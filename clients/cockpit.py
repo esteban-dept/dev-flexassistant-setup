@@ -59,7 +59,8 @@ class CockpitATSClient:
                 raise ValueError("Token key not found in token exchange response.")
 
             self._bearer_token = response_data.get("access_token") or response_data.get("token")
-            
+            print("Debug bearer token:", self._bearer_token)
+
             # Token is valid for one hour 
             self._token_expiry = datetime.now() + timedelta(hours=1)
             

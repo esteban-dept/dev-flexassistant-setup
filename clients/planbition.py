@@ -1,12 +1,10 @@
 # For schedule data (employee data and employee schedule)
 
-# File: planbition_client.py
-
 import requests
 import os
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -14,37 +12,26 @@ logger = logging.getLogger(__name__)
 class PlanbitionClient:
     """
     Client for the Planbition REST API.
-    
-    Handles JWT token authentication and provides methods for
-    retrieving schedule data as required by the GetScheduleTool.
     """
     
     def __init__(self):
-        """Initializes the client by loading credentials from environment variables."""
         self.base_url = os.environ.get("PLANBITION_BASE_URL")
         self.api_key = os.environ.get("PLANBITION_KEY")
         self.username = os.environ.get("PLANBITION_USERNAME")
         self.password = os.environ.get("PLANBITION_PASSWORD")
         
         if not all([self.base_url, self.api_key, self.username, self.password]):
-            logger.error("PLANBITION_BASE_URL, KEY, USERNAME, or PASSWORD not set.")
-            raise ValueError("Planbition API credentials are not fully configured.")
+            logger.error("PLANBITION credentials not fully configured.")
+            raise ValueError("Planbition API credentials are missing.")
             
         self._bearer_token: Optional[str] = None
         self._token_expiry = datetime.now()
 
     def _get_bearer_token(self) -> str:
-        """
-        Retrieves a valid 60-minute bearer token, authenticating if necessary.
-        
-        This method caches the token until it's within a 1-minute
-        expiry window.
-        """
-        # Check if current token is valid (with a 1-minute buffer)
+        """Retrieves or refreshes the 60-minute JWT bearer token."""
         if self._bearer_token and self._token_expiry > (datetime.now() + timedelta(minutes=1)):
             return self._bearer_token
             
-        # Token is invalid or expired, perform authentication
         auth_url = f"{self.base_url}/authenticate/login"
         auth_payload = {
             "Key": self.api_key,
@@ -53,88 +40,141 @@ class PlanbitionClient:
         }
         
         try:
-            logger.info("Authenticating with Planbition API...")
             response = requests.post(auth_url, json=auth_payload)
             response.raise_for_status()
+            data = response.json()
             
-            response_data = response.json()
-            if not response_data.get("success") or not response_data.get("token"):
-                logger.error(f"Planbition auth failed: {response_data.get('error')}")
-                raise Exception(f"Planbition auth failed: {response_data.get('error', 'No token')}")
+            if not data.get("success") or not data.get("token"):
+                raise Exception(f"Auth failed: {data.get('error')}")
 
-            self._bearer_token = response_data["token"]
-            # Token is valid for 60 minutes
+            self._bearer_token = data["token"]
             self._token_expiry = datetime.now() + timedelta(minutes=60)
-            logger.info("Successfully retrieved Planbition token.")
             return self._bearer_token
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error during Planbition authentication: {e}")
+        except Exception as e:
+            logger.error(f"Planbition auth error: {e}")
             raise
 
     def _make_request(self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
-        """Helper function to make authenticated API requests."""
+        """Makes an authenticated request to the API."""
         token = self._get_bearer_token()
-        
-        url = f"{self.base_url}/api/{endpoint}" # All API endpoints are prefixed with /api/
+        url = f"{self.base_url}/api/{endpoint}"
         headers = {
-            "Authorization": f"Bearer {token}", 
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
-            "Accept": "text/plain" 
+            "Accept": "text/plain"
         }
         
         try:
             response = requests.request(method, url, headers=headers, params=params)
-            
-            # Handle token expiry (403 Forbidden is a common response)
-            if response.status_code == 403: 
-                logger.warning("Received 403 (Forbidden), retrying with new token.")
-                self._bearer_token = None # Force re-authentication
-                token = self._get_bearer_token()
-                headers["Authorization"] = f"Bearer {token}"
+            if response.status_code == 403:
+                self._bearer_token = None
+                headers["Authorization"] = f"Bearer {self._get_bearer_token()}"
                 response = requests.request(method, url, headers=headers, params=params)
-
+                
             response.raise_for_status()
             return response.json()
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error calling Planbition API {endpoint}: {e}")
+        except Exception as e:
+            logger.error(f"Error calling {endpoint}: {e}")
             raise
+
+    def _parse_api_datetime(self, date_obj: Union[Dict[str, int], str]) -> Optional[datetime]:
+        """
+        Helper to parse the specific dictionary date format returned by this API.
+        Handles both dict: {'year': 2024, 'month': 11, ...} and ISO strings.
+        """
+        if not date_obj:
+            return None
+            
+        if isinstance(date_obj, dict):
+            try:
+                return datetime(
+                    year=date_obj.get('year', 1970),
+                    month=date_obj.get('month', 1),
+                    day=date_obj.get('day', 1),
+                    hour=date_obj.get('hour', 0),
+                    minute=date_obj.get('minute', 0),
+                    second=date_obj.get('second', 0)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to parse date dict: {date_obj} - {e}")
+                return None
+                
+        if isinstance(date_obj, str):
+            try:
+                return datetime.fromisoformat(date_obj)
+            except ValueError:
+                return None
+                
+        return None
 
     def get_employee_schedule(self, employee_number: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
         """
-        Fetches the schedule for a specific employee within a date range.
-        
-        This uses the ScheduleEmployeeShiftDemand GET endpoint and filters
-        by employeeNumber and the shift's start time.
-        
-        Args:
-            employee_number: The unique employee number of the flex worker.
-            start_date: The start of the date range (e.g., "YYYY-MM-DD").
-            end_date: The end of the date range (e.g., "YYYY-MM-DD").
-            
-        Returns:
-            A list of schedule entries.
+        Fetches schedule and filters client-side using custom date parsing.
         """
-        
-        endpoint = "ScheduleEmployeeShiftDemand" # [cite: 3243]
-        
-        # This filter is more robust because 'employeeNumber' is a
-        # confirmed field in the GET response for this endpoint.
-        filters = [
-            f"employeeNumber eq '{employee_number}'",
-            f"startTime ge {start_date}", # Filter for shifts starting on or after this date
-            f"startTime le {end_date}"  # Filter for shifts starting on or before this date
-        ]
-        
+        # 1. Parse request input dates
+        try:
+            if not start_date or not end_date:
+                 raise ValueError("Dates cannot be empty")
+            req_start = datetime.fromisoformat(str(start_date))
+            req_end = datetime.fromisoformat(str(end_date))
+            req_end = req_end.replace(hour=23, minute=59, second=59)
+        except Exception as e:
+            logger.error(f"Invalid input dates: {e}")
+            return []
+
+        endpoint = "ScheduleEmployeeShiftDemand"
         params = {
-            "filter": " and ".join(filters), # [cite: 1566-1567]
-            "PageNumber": 1,                 # [cite: 1513]
-            "PageSize": 100                  # [cite: 1517, 1521]
+            "filter": f"contains(EmployeeNumber, '{employee_number}')",
+            "PageNumber": 1,
+            "PageSize": 500 
         }
         
         try:
-            return self._make_request("GET", endpoint, params=params)
+            logger.info(f"Fetching schedule for {employee_number}...")
+            response = self._make_request("GET", endpoint, params=params)
+            all_items = response.get("items", [])
+            
+            filtered_items = []
+            for item in all_items:
+                # Use new helper to parse the complex dictionary format
+                start_val = item.get('StartTime') or item.get('startTime')
+                shift_start = self._parse_api_datetime(start_val)
+
+                if shift_start and req_start <= shift_start <= req_end:
+                    # Optional: Enrich item with a standard ISO string for easier frontend use
+                    item['iso_start_time'] = shift_start.isoformat()
+                    filtered_items.append(item)
+            
+            logger.info(f"Returning {len(filtered_items)} valid shifts.")
+            return filtered_items
+
         except Exception as e:
-            print(f"Could not retrieve schedule for employee {employee_number}: {e}")
+            logger.error(f"Error in get_employee_schedule: {e}")
             return []
+
+    def get_employee_details(self, employee_number: str) -> Optional[Dict[str, Any]]:
+        # ... (previous implementation was fine, no changes needed here) ...
+        endpoint = "Employee"
+        params = {"filter": f"contains(EmployeeNumber, '{employee_number}')"}
+        try:
+            result = self._make_request("GET", endpoint, params=params)
+            items = result.get("items", [])
+            if items:
+                emp = items[0]
+                first = emp.get('firstName', '').strip()
+                insertion = emp.get('insertion', '').strip()
+                last = emp.get('lastName', '').strip()
+                full_name = f"{first} {insertion} {last}" if insertion else f"{first} {last}"
+
+                return {
+                    "employee_id": emp.get("id"),
+                    "employee_number": emp.get("employeeNumber"),
+                    "full_name": full_name.strip(),
+                    "email": emp.get("email"),
+                    "country": emp.get("country", "Unknown"),
+                    "is_active": emp.get("isActive", False)
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get employee details: {e}")
+            return None
