@@ -1,4 +1,4 @@
-# For paylisp, sick leave, and reservations
+# For paylisp, and reservations
 
 import requests
 import os
@@ -76,3 +76,24 @@ class KentroClient:
         endpoint = f"/candidates/{candidate_id}/pay_slips/{payslip_id}/file"
         logger.info(f"KentroClient: Fetching payslip file {payslip_id} for Candidate {candidate_id}")
         return self._make_request("GET", endpoint)
+    
+    def get_contracts(self, candidate_id: int) -> List[Dict[str, Any]]:
+        """
+        Gets the list of contracts for a given candidate.
+        
+        Calls: GET /candidates/{CandidateId}/contracts
+        """
+        endpoint = f"/candidates/{candidate_id}/contracts" #
+        logger.info(f"KentroClient: Fetching contracts for Candidate {candidate_id}")
+        return self._make_request("GET", endpoint)
+    
+    def get_reservation_balances(self, candidate_id: int) -> List[Dict[str, Any]]:
+        """
+        Calls GET /candidates/{CandidateId}/reservation-balances
+        (Uses this endpoint as .../reservations is deprecated)
+        """
+        endpoint = f"/candidates/{candidate_id}/reservation-balances"
+        return self._make_request("GET", endpoint)
+    
+
+    
