@@ -5,13 +5,6 @@ import os
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Union
-import sys
-# Add the parent directory to Python path to import clients module
-parent_dir = os.path.dirname(os.getcwd())
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
-
-from clients.planbition import PlanbitionClient
 
 # Set up logging
 logger = logging.getLogger(__name__)
