@@ -12,7 +12,7 @@ parent_dir = os.path.dirname(os.getcwd())
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-from clients.kentro import KentroClient
+from archive.kentro import KentroClient
 
 class KentroInput(BaseModel):
     employee_email: str = Field(description="The flex worker's email address.")

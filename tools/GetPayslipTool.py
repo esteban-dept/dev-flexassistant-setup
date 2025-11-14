@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from langchain_core.tools import tool
-from clients.kentro import KentroClient
+from archive.kentro import KentroClient
 
 class PayslipToolInput(BaseModel):
     employee_email: str = Field(description="The flex worker's email address.")
