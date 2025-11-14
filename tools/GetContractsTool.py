@@ -14,34 +14,23 @@ if parent_dir not in sys.path:
 
 from clients.kentro import KentroClient
 
-# Set up logging
-logger = logging.getLogger(__name__)
-
-class ContractsInput(BaseModel):
-    employee_email: str = Field(description="The flex worker's email address. Used to find their CandidateId.")
-
-@tool(args_schema=ContractsInput)
+class KentroInput(BaseModel):
+    employee_email: str = Field(description="The flex worker's email address.")
+    
+    # --- GetContractsTool ---
+@tool(args_schema=KentroInput)
 def get_contracts_tool(employee_email: str) -> Dict[str, Any]:
     """
     Retrieves a list of all contracts (past and present) for a flex worker
     from the Kentro (Pivoton) API.
     """
-    
     client = KentroClient()
-    
     try:
-        # Step 1: Get the CandidateId using the email
-        candidate_id = client.get_candidate_id_from_email(employee_email)
-        if not candidate_id:
-            return {"error": f"No candidate found with email {employee_email}."}
+        cand_id = client.get_candidate_id_from_email(employee_email)
+        if not cand_id:
+            return {"error": f"Candidate not found: {employee_email}"}
             
-        # Step 2: Fetch the contracts
-        logger.info(f"GetContractsTool: Fetching contracts for Candidate {candidate_id}")
-        contracts_list = client.get_contracts(candidate_id)
-        
-        return {"contracts": contracts_list}
-
+        contracts = client.get_contracts(cand_id)
+        return {"contracts": [c.dict() for c in contracts]}
     except Exception as e:
-        logger.error(f"GetContractsTool: An error occurred: {e}")
-        # This structured error will be handled by the ChatSupervisor
-        return {"error": f"An unexpected error occurred while retrieving contracts: {str(e)}"}
+        return {"error": str(e)}

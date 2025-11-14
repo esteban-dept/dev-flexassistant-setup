@@ -153,7 +153,6 @@ class PlanbitionClient:
             return []
 
     def get_employee_details(self, employee_number: str) -> Optional[Dict[str, Any]]:
-        # ... (previous implementation was fine, no changes needed here) ...
         endpoint = "Employee"
         params = {"filter": f"contains(EmployeeNumber, '{employee_number}')"}
         try:

@@ -14,17 +14,13 @@ if parent_dir not in sys.path:
 
 from clients.kentro import KentroClient
 
-# Set up logging
-logger = logging.getLogger(__name__)
-
 # --- Input Schemas ---
 
 class KentroInput(BaseModel):
     """Shared input schema for Kentro tools that only need an email."""
     employee_email: str = Field(description="The flex worker's email address. Used to find their CandidateId.")
-
-
-# --- Tool: GetReservationsTool ---
+    
+# --- GetReservationsTool ---
 @tool(args_schema=KentroInput)
 def get_reservations_tool(employee_email: str) -> Dict[str, Any]:
     """
@@ -32,19 +28,12 @@ def get_reservations_tool(employee_email: str) -> Dict[str, Any]:
     for a flex worker from the Kentro (Pivoton) API.
     """
     client = KentroClient()
-    
     try:
-        # Step 1: Get the CandidateId using the email
-        candidate_id = client.get_candidate_id_from_email(employee_email)
-        if not candidate_id:
-            return {"error": f"No candidate found with email {employee_email}."}
+        cand_id = client.get_candidate_id_from_email(employee_email)
+        if not cand_id:
+            return {"error": f"Candidate not found: {employee_email}"}
             
-        # Step 2: Fetch the reservation balances
-        logger.info(f"GetReservationsTool: Fetching reservation balances for Candidate {candidate_id}")
-        balances = client.get_reservation_balances(candidate_id)
-        
-        return {"reservation_balances": balances}
-
+        balances = client.get_reservation_balances(cand_id)
+        return {"reservations": [b.dict() for b in balances]}
     except Exception as e:
-            logger.error(f"GetReservationsTool: An error occurred: {e}")
-            return {"error": f"An unexpected error occurred while retrieving reservations: {str(e)}"}
+        return {"error": str(e)}
