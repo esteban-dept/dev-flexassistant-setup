@@ -1,50 +1,17 @@
+# For schedule data (employee data and employee schedule)
+
 import requests
 import os
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Union
-from pydantic import BaseModel, Field
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# --- Data Models ---
-
-class ScheduleItem(BaseModel):
-    id: str
-    employeeNumber: str 
-    personId: str 
-    organisationStructureId: str 
-    organisationStructureName: str 
-    customerId: str 
-    customerName: str 
-    customerStructureName: str 
-    shiftId: str 
-    shiftName: str 
-    shiftQualificationDemandId: str 
-    shiftQualificationDemandName: str 
-    scheduleEmployeeAdministrativeComponents: List[Any] = []
-    
-    # Keep raw dicts for exact API representation
-    startTime: Dict[str, int] 
-    endTime: Dict[str, int] 
-    
-    plannerRemarkPublic: Optional[str] = None
-    plannerRemarkPrivate: Optional[str] = None
-    employeeRemark: Optional[str] = None
-    
-    # Computed fields
-    iso_start_time: Optional[str] = None
-
-    class Config:
-        # Allows the model to ignore extra fields if the API changes
-        extra = "ignore" 
-
-# --- Client Class ---
-
 class PlanbitionClient:
     """
-    Client for the Planbition REST API with Data Model Serialization.
+    Client for the Planbition REST API.
     """
     
     def __init__(self):
@@ -88,6 +55,7 @@ class PlanbitionClient:
             raise
 
     def _make_request(self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """Makes an authenticated request to the API."""
         token = self._get_bearer_token()
         url = f"{self.base_url}/api/{endpoint}"
         headers = {
@@ -110,8 +78,13 @@ class PlanbitionClient:
             raise
 
     def _parse_api_datetime(self, date_obj: Union[Dict[str, int], str]) -> Optional[datetime]:
+        """
+        Helper to parse the specific dictionary date format returned by this API.
+        Handles both dict: {'year': 2024, 'month': 11, ...} and ISO strings.
+        """
         if not date_obj:
             return None
+            
         if isinstance(date_obj, dict):
             try:
                 return datetime(
@@ -122,19 +95,23 @@ class PlanbitionClient:
                     minute=date_obj.get('minute', 0),
                     second=date_obj.get('second', 0)
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to parse date dict: {date_obj} - {e}")
                 return None
+                
         if isinstance(date_obj, str):
             try:
                 return datetime.fromisoformat(date_obj)
             except ValueError:
                 return None
+                
         return None
 
-    def get_employee_schedule(self, employee_number: str, start_date: str, end_date: str) -> List[ScheduleItem]:
+    def get_employee_schedule(self, employee_number: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
         """
-        Fetches the schedule and returns a list of ScheduleItem objects.
+        Fetches schedule and filters client-side using custom date parsing.
         """
+        # 1. Parse request input dates
         try:
             if not start_date or not end_date:
                  raise ValueError("Dates cannot be empty")
@@ -155,34 +132,28 @@ class PlanbitionClient:
         try:
             logger.info(f"Fetching schedule for {employee_number}...")
             response = self._make_request("GET", endpoint, params=params)
-            all_items_raw = response.get("items", [])
+            all_items = response.get("items", [])
             
             filtered_items = []
-            for item_dict in all_items_raw:
-                # Parse date logic
-                start_val = item_dict.get('StartTime') or item_dict.get('startTime')
+            for item in all_items:
+                # Use new helper to parse the complex dictionary format
+                start_val = item.get('StartTime') or item.get('startTime')
                 shift_start = self._parse_api_datetime(start_val)
 
                 if shift_start and req_start <= shift_start <= req_end:
-                    # Inject the ISO string into the dictionary before validation
-                    item_dict['iso_start_time'] = shift_start.isoformat()
-                    
-                    # Serialize into Pydantic Model
-                    try:
-                        schedule_item = ScheduleItem(**item_dict)
-                        filtered_items.append(schedule_item)
-                    except Exception as validation_error:
-                        logger.warning(f"Failed to serialize item {item_dict.get('id')}: {validation_error}")
+                    # Optional: Enrich item with a standard ISO string for easier frontend use
+                    item['iso_start_time'] = shift_start.isoformat()
+                    filtered_items.append(item)
             
-            logger.info(f"Returning {len(filtered_items)} valid ScheduleItem objects.")
+            logger.info(f"Returning {len(filtered_items)} valid shifts.")
             return filtered_items
 
         except Exception as e:
             logger.error(f"Error in get_employee_schedule: {e}")
             return []
-    
 
     def get_employee_details(self, employee_number: str) -> Optional[Dict[str, Any]]:
+        # ... (previous implementation was fine, no changes needed here) ...
         endpoint = "Employee"
         params = {"filter": f"contains(EmployeeNumber, '{employee_number}')"}
         try:
