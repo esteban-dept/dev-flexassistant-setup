@@ -1,7 +1,15 @@
+import os
+import sys
+
+parent_dir = os.path.dirname(os.getcwd())
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
-from planbition import PlanbitionClient# Import the client from Step 1
+from clients.planbition import PlanbitionClient# Import the client from Step 1
+
 
 # Initialize the client once
 client = PlanbitionClient()
