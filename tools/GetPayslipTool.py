@@ -1,10 +1,10 @@
 import sys
+import os
 parent_dir = os.path.dirname(os.getcwd())
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
 import requests
-import os
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -22,7 +22,7 @@ class KentroInput(BaseModel):
 
 # --- GetPayslipTool ---
 @tool(args_schema=PayslipToolInput)
-def get_payslip_tool(employee_email: str, latest: bool = False, payslip_id: Optional[int] = None) -> Dict[str, Any]:
+def get_payslip(employee_email: str, latest: bool = False, payslip_id: Optional[int] = None) -> Dict[str, Any]:
     """Retrieves payslip information (list or specific file) for a flex worker."""
     client = KentroClient()
     try:
