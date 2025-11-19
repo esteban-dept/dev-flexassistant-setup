@@ -1,39 +1,45 @@
-
 import sys
 import os
-parent_dir = os.path.dirname(os.getcwd())
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
-
-import requests
 import logging
-from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from langchain_core.tools import tool
 
-from archive.kentro import KentroClient
+# Add project root to path
+parent_dir = os.path.dirname(os.getcwd())
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 
-# --- Input Schemas ---
+from clients.kentro import KentroClient
 
-class KentroInput(BaseModel):
-    """Shared input schema for Kentro tools that only need an email."""
-    employee_email: str = Field(description="The flex worker's email address. Used to find their CandidateId.")
-    
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# --- Input Schema ---
+class ReservationsToolInput(BaseModel):
+    candidate_id: str = Field(description="The flex worker's candidate ID.")
+
 # --- GetReservationsTool ---
-@tool(args_schema=KentroInput)
-def get_reservations(employee_email: str) -> Dict[str, Any]:
+@tool(args_schema=ReservationsToolInput)
+def get_reservations(candidate_id: str) -> Any:
     """
     Retrieves a list of all reservation balances (vacation, etc.)
     for a flex worker from the Kentro (Pivoton) API.
+    Returns a list of ReservationBalance Pydantic models.
     """
     client = KentroClient()
     try:
-        cand_id = client.get_candidate_id_from_email(employee_email)
-        if not cand_id:
-            return {"error": f"Candidate not found: {employee_email}"}
-            
+        # Ensure candidate_id is int as required by client methods
+        cand_id = int(candidate_id)
+
+        # Fetch reservation balances
+        # This returns a List[ReservationBalance] (Pydantic models)
         balances = client.get_reservation_balances(cand_id)
-        return {"reservations": [b.dict() for b in balances]}
+        
+        return balances
+
+    except ValueError:
+        return {"error": f"Invalid Candidate ID format: {candidate_id}"}
     except Exception as e:
+        logger.error(f"Error in get_reservations: {e}")
         return {"error": str(e)}
