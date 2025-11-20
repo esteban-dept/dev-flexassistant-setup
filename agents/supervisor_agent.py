@@ -30,7 +30,7 @@ class ChatSupervisorAgent:
 
         # --- 1. Define Nodes ---
         graph.add_node("classify_intent", self.classify_intent_node)
-        graph.add_node("action_execution_agent", self.action_agent_instance)
+        graph.add_node("action_execution_agent", self.action_agent_instance.run)
         graph.add_node("information_retrieval_agent", self.information_retrieval_agent)
         graph.add_node("fallback_tool", self.fallback_tool)
         graph.add_node("answer_agent", self.answer_agent) # REQUIRED by architecture
