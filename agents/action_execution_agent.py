@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 parent_dir = os.path.dirname(os.getcwd())
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
@@ -20,7 +19,6 @@ from tools.GetScheduleTool import get_schedule
 
 # ------------------------
 
-
 class ActionExecutionAgent:
     def __init__(self, llm_model, system_prompt):
         self.tools = [
@@ -36,21 +34,22 @@ class ActionExecutionAgent:
     def run(self, state: AgentState) -> dict:
         print("---ACTION EXECUTION AGENT: Starting run()---")
         
-        # --- 1. IDEMPOTENCY CHECK 
+        # 1. IDEMPOTENCY CHECK
         if state.get("retrieved_data"):
             print("---Data already retrieved. Skipping execution.---")
             return {}
 
         try:
-            # 2. Prepare Context
+            # 2. PREPARE CONTEXT
             c_id = state.get("candidate_id", "unknown")
-            e_id = state.get("employee_id", "unknown")
-            last_message = state["messages"][-1]
+            e_id = state.get("employee_number", "unknown") # Fixed key name
+            messages_list = state.get("messages", [])
             
-            print(f"---Retrieved context: candidate_id={c_id}, employee_id={e_id}---")
-            print(f"---Last message type: {type(last_message).__name__}---")
-            print(f"---Last message content: {last_message.content[:100]}...---")
-
+            if not messages_list:
+                return {"error_message": "No user message provided."}
+            
+            last_message = messages_list[-1]
+            
             contextualized_prompt = (
                 f"{self.system_prompt}\n\n"
                 f"CONTEXT DATA:\n"
@@ -59,51 +58,41 @@ class ActionExecutionAgent:
                 "You must pass these IDs to the tools as arguments."
             )
 
-            messages = [SystemMessage(content=contextualized_prompt)] + [last_message]
-            print(f"---Prepared {len(messages)} messages for LLM---")
-            print(f"---System prompt length: {len(contextualized_prompt)} characters---")
-            
-            # 3. Invoke LLM
-            print("---Calling LLM with tools---")
+            # 3. CALL LLM
+            print("---Invoking LLM (with tools)---")
+            messages = [SystemMessage(content=contextualized_prompt), last_message]
             agent_response = self.llm_with_tools.invoke(messages)
-            print(f"---LLM response received---")
-            print(f"---Response type: {type(agent_response).__name__}---")
-            print("agent_response.tool_calls:", agent_response.tool_calls)
-            print(f"---Tool calls count: {len(agent_response.tool_calls) if agent_response.tool_calls else 0}---")
             
-            # 4. Handle Tool Calls
-            if agent_response.tool_calls:
-                tool_name = agent_response.tool_calls[0]['name']
-                tool_args = agent_response.tool_calls[0].get('args', {})
-                print(f"---Executing Tool: {tool_name}---")
-                print(f"---Tool arguments: {tool_args}---")
-                
-                # Execute Tool
-                print("---Invoking tool executor---")
-                tool_output_response = self.tool_executor.invoke({"messages": [agent_response]})
-                print(f"---Tool executor response received---")
-                print(f"---Tool output messages count: {len(tool_output_response.get('messages', []))}---")
-                
-                last_tool_message = tool_output_response["messages"][-1]
-                print(f"---Last tool message type: {type(last_tool_message).__name__}---")
-                
-                if isinstance(last_tool_message, ToolMessage):
-                    result_length = len(str(last_tool_message.content))
-                    print(f"---Tool execution completed. Result length: {result_length} characters---")
-                    print(f"---Tool result preview: {str(last_tool_message.content)[:200]}...---")
-                    return {
-                        "retrieved_data": last_tool_message.content,
-                        "error_message": None
-                    }
-                else:
-                    print(f"---Unexpected tool message type: {type(last_tool_message)}---")
+            # 4. CHECK FOR EXISTING TOOL OUTPUTS (Avoid Double Execution)
+            # If the LLM somehow returns the tool output directly (rare but possible), use it.
+            if hasattr(agent_response, "messages"):
+                existing_tool_msgs = [m for m in agent_response.messages if isinstance(m, ToolMessage)]
+                if existing_tool_msgs:
+                    print("---LLM response already contains tool output. Skipping re-execution.---")
+                    return {"retrieved_data": existing_tool_msgs[-1].content, "error_message": None}
+
+            # 5. CHECK FOR TOOL CALLS
+            if not agent_response.tool_calls:
+                print("---No tool call detected in LLM response---")
+                return {"error_message": "Agent did not request a valid tool."}
+
+            # 6. EXECUTE TOOL
+            tool_name = agent_response.tool_calls[0]['name']
+            print(f"---Executing Tool: {tool_name}---")
             
-            print("---No tool called by LLM---")
-            return {"error_message": "Agent failed to select a valid tool."}
+            tool_output_response = self.tool_executor.invoke({"messages": [agent_response]})
+            
+            # 7. EXTRACT RESULT
+            last_tool_message = tool_output_response["messages"][-1]
+            content = last_tool_message.content
+            
+            print(f"---Tool execution completed. Result length: {len(str(content))}---")
+            
+            return {
+                "retrieved_data": str(content),
+                "error_message": None
+            }
 
         except Exception as e:
-            print(f"---Error in ActionExecutionAgent: {e}---")
-            print(f"---Error type: {type(e).__name__}---")
-            import traceback
-            print(f"---Full traceback: {traceback.format_exc()}---")
+            print(f"---ERROR in ActionExecutionAgent: {e}---")
             return {"error_message": str(e)}

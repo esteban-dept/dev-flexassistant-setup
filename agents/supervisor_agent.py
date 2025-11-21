@@ -1,19 +1,21 @@
 from typing import TypedDict, Annotated, List, Union
 import os
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+import sys
+from langchain_core.messages import SystemMessage
 from langgraph.graph import StateGraph, END
 
-from agents.agent_state import AgentState
-from action_execution_agent import ActionExecutionAgent
-
-import os
-import sys
-parent_dir = os.path.dirname(os.getcwd())
+# Ensure parent dir is in path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-# Load the action execution prompt from the text file
-with open(os.path.join(parent_dir, "prompts", "action_execution_prompt.txt"), "r") as f:
+from agents.agent_state import AgentState
+from agents.action_execution_agent import ActionExecutionAgent
+
+# Load the action execution prompt
+prompt_path = os.path.join(parent_dir, "prompts", "action_execution_prompt.txt")
+with open(prompt_path, "r") as f:
     action_execution_prompt = f.read()
 
 class ChatSupervisorAgent:
@@ -21,6 +23,7 @@ class ChatSupervisorAgent:
         self.model = model
         self.system = system_prompt
         
+        # Initialize the specialist agent
         self.action_agent_instance = ActionExecutionAgent(
             llm_model=model,
             system_prompt=action_execution_prompt
@@ -33,12 +36,12 @@ class ChatSupervisorAgent:
         graph.add_node("action_execution_agent", self.action_agent_instance.run)
         graph.add_node("information_retrieval_agent", self.information_retrieval_agent)
         graph.add_node("fallback_tool", self.fallback_tool)
-        graph.add_node("answer_agent", self.answer_agent) # REQUIRED by architecture
+        graph.add_node("answer_agent", self.answer_agent)
 
-        # --- 2. Define The Entry Point ---
+        # --- 2. Define Entry Point ---
         graph.set_entry_point("classify_intent")
 
-        # --- 3. Define The Conditional Edge (The Router) ---
+        # --- 3. Define Router ---
         graph.add_conditional_edges(
             "classify_intent", 
             self.route_intent, 
@@ -49,52 +52,42 @@ class ChatSupervisorAgent:
             }
         )
 
-        # --- 4. Define Normal Edges (Enforcing ToV) ---
+        # --- 4. Define Edges to AnswerAgent ---
         graph.add_edge("action_execution_agent", "answer_agent")
         graph.add_edge("information_retrieval_agent", "answer_agent")
         graph.add_edge("fallback_tool", "answer_agent")
-        
-        # AnswerAgent finishes the run
         graph.add_edge("answer_agent", END)
 
         # 5. Compile
         self.graph = graph.compile(checkpointer=checkpointer)
 
     def classify_intent_node(self, state: AgentState):
-        '''Reads the user query and classifies the primary action.'''
+        print("---SUPERVISOR: Classifying Intent---")
         messages = [SystemMessage(content=self.system)] + state['messages']
         response = self.model.invoke(messages)
         intent = response.content.strip()
 
-        # Failsafe for valid routing
         valid_routes = ["ActionExecutionAgent", "InformationRetrievalAgent", "FallbackTool"]
         if intent not in valid_routes:
             print(f"Warning: Invalid intent '{intent}'. Defaulting to Fallback.")
             intent = "FallbackTool"
 
-        print(f"Intent classified as: {intent}")
-        
-        # Return the update to the state
+        print(f"Intent: {intent}")
         return {"next_action": intent}
 
     def route_intent(self, state: AgentState):
-        '''Reads the decision made by the intent classifier node'''
         return state["next_action"]
 
     # --- SPECIALISTS ---
-
     def information_retrieval_agent(self, state: AgentState):
-        '''Retrieves information from the Sharepoint KnowledgeBase'''
         print("---Start Information Retrieval Agent---")
-        # Logic to call RAG...
         return {"retrieved_data": "Sick leave policy details..."}
 
     def fallback_tool(self, state: AgentState):
         print("---Start Fallback Tool---")
-        return {"error": "Could not resolve query."}
+        return {"error_message": "Could not resolve query."}
 
-    # --- ANSWER AGENT (Final Response) ---
+    # --- ANSWER AGENT ---
     def answer_agent(self, state: AgentState):
         print("---Start Answer Agent---")
-        # return {"messages": [AIMessage(content="Final response to user")]}
-        
+        return {}
