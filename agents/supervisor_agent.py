@@ -3,6 +3,7 @@ import os
 import sys
 from langchain_core.messages import SystemMessage
 from langgraph.graph import StateGraph, END
+from datetime import datetime
 
 # Ensure parent dir is in path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -63,7 +64,12 @@ class ChatSupervisorAgent:
 
     def classify_intent_node(self, state: AgentState):
         print("---SUPERVISOR: Classifying Intent---")
-        messages = [SystemMessage(content=self.system)] + state['messages']
+        
+        # Add current date context to system prompt
+        current_date = state.get("date", datetime.now().strftime("%Y-%m-%d"))
+        contextualized_system = f"You are an internal agent. Today's date is: {current_date}\n\n{self.system}"
+        
+        messages = [SystemMessage(content=contextualized_system)] + state['messages']
         response = self.model.invoke(messages)
         intent = response.content.strip()
 

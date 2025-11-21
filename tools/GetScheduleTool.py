@@ -1,5 +1,7 @@
 import os
 import sys
+import time
+from requests.exceptions import HTTPError
 
 parent_dir = os.path.dirname(os.getcwd())
 if parent_dir not in sys.path:
@@ -26,22 +28,36 @@ def get_schedule(employee_number: str, start_date: str, end_date: str) -> Dict[s
     for a specified date range. This tool is called by the ActionExecutionAgent
     when a user asks about their schedule.
     """
-    try:
-        # The client now returns a list of Pydantic ScheduleItem objects
-        schedule_items = client.get_employee_schedule(
-            employee_number=employee_number,
-            start_date=start_date,
-            end_date=end_date
-        )
-        
-        # Serialize the Pydantic models back into dictionaries
-        # so they can be returned as JSON to the agent.
-        #schedule_list = [item.dict() for item in schedule_items]
-        
-        # Return a structured dictionary for the agent
-        return schedule_items
-
-    except Exception as e:
-        # Return a structured error dictionary
-        # [cite_start]This is better than returning a raw string [cite: 685-686]
-        return {"error": f"Error retrieving schedule: {e}"}
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # The client now returns a list of Pydantic ScheduleItem objects
+            schedule_items = client.get_employee_schedule(
+                employee_number=employee_number,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Serialize the Pydantic models back into dictionaries
+            # so they can be returned as JSON to the agent.
+            #schedule_list = [item.dict() for item in schedule_items]
+            
+            # Return a structured dictionary for the agent
+            return schedule_items
+            
+        except HTTPError as e:
+            if e.response.status_code == 500 and attempt < max_retries - 1:
+                print(f"500 Server Error on attempt {attempt + 1}. Retrying in 2 seconds...")
+                time.sleep(2)
+                continue
+            else:
+                raise e
+        except Exception as e:
+            if "500" in str(e) and attempt < max_retries - 1:
+                print(f"Server error detected: {e}. Retrying in 2 seconds...")
+                time.sleep(2)
+                continue
+            else:
+                raise e
+    
+    return "Failed to retrieve schedule after multiple attempts"

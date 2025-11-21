@@ -7,8 +7,9 @@ if parent_dir not in sys.path:
 from dotenv import load_dotenv
 _ = load_dotenv()
 
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import SystemMessage, ToolMessage, AIMessage
 from langgraph.prebuilt import ToolNode
+from datetime import datetime
 
 from agents.agent_state import AgentState
 
@@ -32,7 +33,7 @@ class ActionExecutionAgent:
         self.system_prompt = system_prompt 
 
     def run(self, state: AgentState) -> dict:
-        print("---ACTION EXECUTION AGENT: Starting run()---")
+        print(f"---ACTION EXECUTION AGENT: Starting run() [ID: {id(self)}]---")
         
         # 1. IDEMPOTENCY CHECK
         if state.get("retrieved_data"):
@@ -42,15 +43,18 @@ class ActionExecutionAgent:
         try:
             # 2. PREPARE CONTEXT
             c_id = state.get("candidate_id", "unknown")
-            e_id = state.get("employee_number", "unknown") # Fixed key name
+            e_id = state.get("employee_number", "unknown")
+            current_date = state.get("date", datetime.now().strftime("%Y-%m-%d"))
             messages_list = state.get("messages", [])
             
             if not messages_list:
                 return {"error_message": "No user message provided."}
             
             last_message = messages_list[-1]
+            print(f"DEBUG: Processing message: {last_message.content[:50]}...")
             
             contextualized_prompt = (
+                f"Current date: {current_date}\n\n"
                 f"{self.system_prompt}\n\n"
                 f"CONTEXT DATA:\n"
                 f"- Candidate ID: {c_id}\n"
@@ -64,7 +68,6 @@ class ActionExecutionAgent:
             agent_response = self.llm_with_tools.invoke(messages)
             
             # 4. CHECK FOR EXISTING TOOL OUTPUTS (Avoid Double Execution)
-            # If the LLM somehow returns the tool output directly (rare but possible), use it.
             if hasattr(agent_response, "messages"):
                 existing_tool_msgs = [m for m in agent_response.messages if isinstance(m, ToolMessage)]
                 if existing_tool_msgs:
@@ -76,11 +79,21 @@ class ActionExecutionAgent:
                 print("---No tool call detected in LLM response---")
                 return {"error_message": "Agent did not request a valid tool."}
 
-            # 6. EXECUTE TOOL
-            tool_name = agent_response.tool_calls[0]['name']
+            # 6. EXECUTE TOOL (SINGLE EXECUTION ENFORCEMENT)
+            # We explicitly take only the FIRST tool call to avoid double-execution
+            first_tool_call = agent_response.tool_calls[0]
+            tool_name = first_tool_call['name']
             print(f"---Executing Tool: {tool_name}---")
+            print(f"DEBUG: Tool Args: {first_tool_call.get('args')}")
             
-            tool_output_response = self.tool_executor.invoke({"messages": [agent_response]})
+            # Create a sanitized AIMessage containing ONLY the first tool call
+            sanitized_msg = AIMessage(
+                content="",
+                tool_calls=[first_tool_call]
+            )
+            
+            # Invoke ToolNode with the sanitized message
+            tool_output_response = self.tool_executor.invoke({"messages": [sanitized_msg]})
             
             # 7. EXTRACT RESULT
             last_tool_message = tool_output_response["messages"][-1]

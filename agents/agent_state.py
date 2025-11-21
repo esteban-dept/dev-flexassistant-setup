@@ -3,6 +3,7 @@ from langchain_core.messages import AnyMessage
 
 # Agent State
 class AgentState(TypedDict):
+   date: Annotated[str, "Current date context for queries"]
    messages: Annotated[list[AnyMessage], "Conversation messages"]
    candidate_id: Annotated[str, "Candidate ID for Kentro"]
    employee_number: Annotated[str, "Employee Number for Planbition"]
